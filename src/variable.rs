@@ -116,3 +116,49 @@ pub trait Variable: Send + Sync  where Self: 'static{
 pub fn count_exposed() -> usize {
     EXPOSED_VARS.len()
 }
+
+/// 用于系列数据格式化的选项
+#[derive(Debug, Clone)]
+pub struct SeriesOptions {
+    /// 是否使用固定长度的数据点
+    pub fixed_length: bool,
+    /// 是否包含描述信息
+    pub include_description: bool,
+    /// 格式化后数据的最大长度
+    pub max_length: Option<usize>,
+}
+
+impl Default for SeriesOptions {
+    fn default() -> Self {
+        Self {
+            fixed_length: true,
+            include_description: true,
+            max_length: None,
+        }
+    }
+}
+
+impl SeriesOptions {
+    /// 创建新的系列选项
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
+    /// 设置是否使用固定长度
+    pub fn with_fixed_length(mut self, fixed_length: bool) -> Self {
+        self.fixed_length = fixed_length;
+        self
+    }
+    
+    /// 设置是否包含描述信息
+    pub fn with_description(mut self, include_description: bool) -> Self {
+        self.include_description = include_description;
+        self
+    }
+    
+    /// 设置最大长度
+    pub fn with_max_length(mut self, max_length: Option<usize>) -> Self {
+        self.max_length = max_length;
+        self
+    }
+}

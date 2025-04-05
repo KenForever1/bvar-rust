@@ -21,8 +21,20 @@ use crate::detail::combiner::Combiner;
 use std::fmt::Write;
 
 /// 表示一个无效的反向操作
+#[derive(Clone)]
 pub struct VoidOp;
 
+use std::sync::Arc;
+use parking_lot::Mutex;
+
+
+pub trait ReducerTrait<T, Op> {
+    fn get_value(&self) -> T;
+
+    fn reset(&self) -> T;
+
+    fn op(&self) -> Op;
+}
 
 /// 提供将多值规约为单值的功能
 ///
@@ -31,12 +43,13 @@ pub struct VoidOp;
 ///   - 结合性:     a Op (b Op c) == (a Op b) Op c
 ///   - 交换性:     a Op b == b Op a;
 ///   - 无副作用:   a Op b在a和b固定时永远产生相同结果
+#[derive(Clone)]
 pub struct Reducer<T, Op> where
-T: Send + Sync,
-Op: Combiner<T> + Send + Sync + 'static,
+T: Clone + Send + Sync,
+Op: Combiner<T> + Send + Sync + 'static + Clone,
 {
     /// 内部组合器
-    combiner: AgentCombiner<T, Op>,
+    combiner: Arc<Mutex<AgentCombiner<T, Op>>>,
     /// 最后一次暴露的名称
     _name: String,
 }
@@ -44,20 +57,20 @@ Op: Combiner<T> + Send + Sync + 'static,
 impl<T, Op> Reducer<T, Op>
 where
     T: Clone + Send + Sync + fmt::Display + 'static,
-    Op: Combiner<T> + Send + Sync + 'static,
+    Op: Combiner<T> + Send + Sync + 'static + Clone,
 {
     /// 创建新的Reducer
     pub fn new(identity: T, op: Op, name: String) -> Self {
         Self {
-            combiner: AgentCombiner::new(identity, op, name),
+            combiner: Arc::new(Mutex::new(AgentCombiner::new(identity, op, name))),
             _name: String::new(),
         }
     }
     
     /// 添加一个值
     pub fn add(&mut self, value: T) -> &Self {
-        let op = self.combiner.op().clone();
-        if let Some(agent) = self.combiner.get_or_create_tls_agent() {
+        let op = self.combiner.lock().op().clone();
+        if let Some(agent) = self.combiner.lock().get_or_create_tls_agent() {
             let guard = agent.lock();
             op.combine(guard.value.clone(), value);
         }
@@ -66,25 +79,43 @@ where
     
     /// 获取规约后的值
     pub fn get_value(&self) -> T {
-        self.combiner.combine_agents()
+        self.combiner.lock().combine_agents()
     }
     
     /// 重置规约的值为identity
     pub fn reset(&self) -> T {
-        self.combiner.reset_all_agents()
+        self.combiner.lock().reset_all_agents()
     }
     
     /// 获取操作符实例
-    pub fn op(&self) -> &Op {
-        self.combiner.op()
+    pub fn op(&self) -> Op {
+        self.combiner.lock().op().clone()
     }
 
+}
+
+impl<T, Op> ReducerTrait<T, Op> for Reducer<T, Op>
+where
+    T: Clone + Send + Sync + fmt::Display + 'static,
+    Op: Combiner<T> + Send + Sync + 'static + Clone,
+{
+    fn get_value(&self) -> T {
+        self.get_value()
+    }
+
+    fn reset(&self) -> T {
+        self.reset()
+    }
+
+    fn op(&self) -> Op {
+        self.op()
+    }
 }
 
 impl<T, Op> Variable for Reducer<T, Op>
 where
     T: Clone + Send + Sync + fmt::Display + 'static,
-    Op: Combiner<T> + Send + Sync + 'static,
+    Op: Combiner<T> + Send + Sync + 'static + Clone,
 {
     fn describe(&self, f: &mut String, _quote_string: bool) -> bool {
         let _= write!(f, "{}", self.get_value());
@@ -104,15 +135,15 @@ where
         let result = <dyn Variable>::default_expose_impl(self, prefix, name);
         if result == 0 {
             // 仅在成功时更新名称
-            self.combiner.set_name(full_name);
+            self.combiner.lock().set_name(full_name);
         }
         result
     }
     
     fn name(&self) -> String {
-        self.combiner.name().to_string()
+        self.combiner.lock().name().to_string()
     }
-}
+}   
 
 // 常用组合器的实现
 use num_traits::NumOps;
